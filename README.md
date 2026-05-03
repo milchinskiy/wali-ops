@@ -63,3 +63,25 @@ modules/
   service/          verb-oriented service-manager operations
   user/             local user account operations
 ```
+
+## Tests
+
+`wali-ops` tests are black-box shell tests. They create temporary manifests,
+point wali at this repository's `modules/` directory, and prepend fake target
+commands to `PATH` so command arguments and idempotence branches can be checked
+without touching the host package or service manager.
+
+Run them with a wali binary on `PATH`:
+
+```sh
+tests/run.sh
+```
+
+Or point the harness at an explicit binary:
+
+```sh
+WALI_BIN=/path/to/wali tests/run.sh
+```
+
+The harness is written for POSIX `sh` and avoids Bash, Python, `jq`, and other
+non-essential test dependencies.
