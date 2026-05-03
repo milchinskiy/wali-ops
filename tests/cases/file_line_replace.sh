@@ -41,8 +41,8 @@ MANIFEST
 run_wali_apply_failure
 assert_output_contains "line must be a single line"
 
-replace_file=$TEST_SANDBOX/replace.txt
-printf '%s\n' 'one one one' >"$replace_file"
+replace_first_file=$TEST_SANDBOX/replace-first.txt
+printf '%s\n' 'one one one' >"$replace_first_file"
 {
 	manifest_header
 	cat <<MANIFEST
@@ -50,7 +50,7 @@ printf '%s\n' 'one one one' >"$replace_file"
 			id = "replace-first",
 			module = "ops.file.replace",
 			args = {
-				path = $(lua_quote "$replace_file"),
+				path = $(lua_quote "$replace_first_file"),
 				find = "one",
 				replace = "two",
 				all = false,
@@ -61,13 +61,40 @@ MANIFEST
 } >"$TEST_MANIFEST"
 
 run_wali_apply
-expected=$TEST_SANDBOX/expected-replace.txt
+expected=$TEST_SANDBOX/expected-replace-first.txt
 printf '%s\n' 'two one one' >"$expected"
-cmp -s "$expected" "$replace_file" || {
-	printf '%s\n' 'unexpected file.replace result' >&2
-	cat "$replace_file" >&2
+cmp -s "$expected" "$replace_first_file" || {
+	printf '%s\n' 'unexpected file.replace all=false result' >&2
+	cat "$replace_first_file" >&2
+	exit 1
+}
+
+replace_all_file=$TEST_SANDBOX/replace-all.txt
+printf '%s\n' 'one one one' >"$replace_all_file"
+{
+	manifest_header
+	cat <<MANIFEST
+		{
+			id = "replace-all",
+			module = "ops.file.replace",
+			args = {
+				path = $(lua_quote "$replace_all_file"),
+				find = "one",
+				replace = "two",
+			},
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+expected_all=$TEST_SANDBOX/expected-replace-all.txt
+printf '%s\n' 'two two two' >"$expected_all"
+cmp -s "$expected_all" "$replace_all_file" || {
+	printf '%s\n' 'unexpected file.replace all=true result' >&2
+	cat "$replace_all_file" >&2
 	exit 1
 }
 
 run_wali_apply
-cmp -s "$expected" "$replace_file" || fail "file.replace second apply changed content unexpectedly"
+cmp -s "$expected_all" "$replace_all_file" || fail "file.replace all=true second apply changed content unexpectedly"
