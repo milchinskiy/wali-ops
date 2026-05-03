@@ -99,3 +99,20 @@ MANIFEST
 run_wali_apply
 assert_command_logged "sv [status] [$service_dir/stopped]"
 assert_command_logged "sv [up] [$service_dir/stopped]"
+
+reset_command_log
+{
+	manifest_header
+	cat <<MANIFEST
+		{
+			id = "runit-reject-service-slash",
+			module = "ops.service.runit.start",
+			args = { service = "../escape", service_dir = $(lua_quote "$service_dir") },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply_failure
+assert_output_contains "must not contain '/'"
+assert_command_not_logged 'sv [up]'

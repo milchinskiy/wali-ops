@@ -41,8 +41,6 @@ return {
 			find = { type = "string", required = true },
 			replace = { type = "string", required = true },
 			all = { type = "boolean", default = true },
-			mode = lib.schema.mode(),
-			owner = lib.schema.owner(),
 		},
 	},
 
@@ -55,7 +53,7 @@ return {
 		if err ~= nil then
 			return err
 		end
-		return lib.validate_mode_owner(args)
+		return nil
 	end,
 
 	apply = function(ctx, args)
@@ -70,9 +68,7 @@ return {
 		local content = ctx.host.fs.read_text(args.path)
 		local updated, count = plain_replace(content, args.find, args.replace, args.all)
 		if count == 0 then
-			local result = lib.result.apply():unchanged(args.path, "text not found"):data({ replacements = 0 })
-			lib.apply_mode_owner(ctx, result, args.path, args)
-			return result:build()
+			return lib.result.apply():unchanged(args.path, "text not found"):data({ replacements = 0 }):build()
 		end
 
 		local result = lib.result.apply()
@@ -82,8 +78,6 @@ return {
 			lib.write_file_opts({
 				create_parents = false,
 				replace = true,
-				mode = args.mode,
-				owner = args.owner,
 			})
 		))
 		return result:data({ replacements = count }):build()

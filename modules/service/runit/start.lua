@@ -35,13 +35,13 @@ local function validate_service_name(name, field)
 	if name:sub(1, 1) == "-" then
 		return lib.validation_error(field .. " must not start with '-'")
 	end
+	if name:find("/", 1, true) ~= nil then
+		return lib.validation_error(field .. " must not contain '/'")
+	end
 	return nil
 end
 
 local function target(ctx, args)
-	if ctx.host.path.is_absolute(args.service) then
-		return args.service
-	end
 	return ctx.host.path.join(args.service_dir, args.service)
 end
 

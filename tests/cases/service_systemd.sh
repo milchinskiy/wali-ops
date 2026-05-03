@@ -103,3 +103,20 @@ MANIFEST
 run_wali_apply_failure
 assert_output_contains "must not start with '-'"
 assert_command_not_logged 'systemctl [start]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "reject-slash-unit",
+			module = "ops.service.systemd.start",
+			args = { unit = "bad/unit.service" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply_failure
+assert_output_contains "must not contain '/'"
+assert_command_not_logged 'systemctl [start]'
