@@ -41,7 +41,7 @@ end
 
 return {
 	name = "file remove line",
-	description = "Remove exact line occurrences from a UTF-8 text file.",
+	description = "Remove exact line occurrences.",
 
 	schema = {
 		type = "object",

@@ -31,7 +31,7 @@ end
 
 return {
 	name = "file replace",
-	description = "Replace literal text in a UTF-8 text file.",
+	description = "Replace literal text.",
 
 	schema = {
 		type = "object",

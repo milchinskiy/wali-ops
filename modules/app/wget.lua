@@ -25,7 +25,7 @@ end
 
 return {
 	name = "wget download",
-	description = "Download one URL to a target-host file using wget.",
+	description = "Download a URL to a file with wget.",
 	requires = { command = "wget" },
 
 	schema = {

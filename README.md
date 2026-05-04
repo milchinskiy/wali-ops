@@ -1,10 +1,10 @@
 # wali-ops
 
-Small, practical external modules for
-[wali](https://github.com/milchinskiy/wali) host automation.
+`wali-ops` is a small set of external modules for
+[wali](https://github.com/milchinskiy/wali).
 
-`wali-ops` is intentionally imperative and verb-oriented. A task says what it
-does:
+Modules are written as verbs. A task describes the operation it is
+about to run:
 
 ```lua
 {
@@ -14,10 +14,13 @@ does:
 }
 ```
 
-The modules are not a declarative resource model. They are small operations
-built on top of wali's public Lua module API and target-host primitives.
+There is no generic `package` or `service` resource here. If a host uses APT,
+use an APT module. If it uses systemd, use a systemd module. That keeps the
+module behavior easy to read and close to the command that will actually run.
 
-## Use as a wali module source
+## Using this repository from wali
+
+Point a wali manifest at the `modules/` directory and choose a namespace:
 
 ```lua
 modules = {
@@ -33,7 +36,7 @@ modules = {
 }
 ```
 
-Then use modules by their path under `modules/`:
+Then reference modules by path:
 
 ```lua
 tasks = {
@@ -56,209 +59,188 @@ tasks = {
 }
 ```
 
-## Common behavior model
+## Conventions
 
-All modules return wali apply results. Command-oriented modules report command
-changes; file-oriented modules return filesystem changes from wali host
-filesystem primitives. All modules fail the task by raising an error when
-validation, probing, command execution, or filesystem mutation fails.
+All paths are paths on the target host. Where a module validates a path, it
+expects an absolute path. This applies to arguments such as `path`, `dest`,
+`home`, `shell`, `source_dir`, and `service_dir`.
 
-General conventions:
+A `timeout` argument, when present, is passed to wali command execution. Use the
+same timeout strings wali accepts, for example `10s` or `2m`.
 
-- All paths are target-host paths unless explicitly stated otherwise.
-- Path arguments named `path`, `dest`, `home`, `shell`, `source_dir`, or
-  `service_dir` must be absolute where the module validates them.
-- `timeout` is a wali command timeout string such as `10s` or `2m`. If omitted,
-  wali's host command timeout applies.
-- Package names must be non-empty, must not contain whitespace or control
-  characters, and must not start with `-`.
-- Service/unit names must be non-empty, must not contain whitespace, control
-  characters, or `/`, and must not start with `-`.
-- User/group names must be non-empty, must not contain whitespace, control
-  characters, `:`, or `/`, and must not start with `-`.
-- `mode` is an octal string accepted by `wali.builtin.lib.mode_bits`, for
-  example `"0644"`.
-- `owner` is `{ user = "name-or-id", group = "name-or-id" }`; either field may
-  be omitted.
-- Modules that expose `mode`/`owner` may apply those metadata changes when the
-  file already exists and content is already correct. Use
-  `wali.builtin.permissions` for standalone metadata management.
-- Modules that do not expose `mode`/`owner` never perform metadata-only changes.
+Name validation is strict on purpose:
 
-For command modules, successful command execution reports an `updated` command
-result unless the module first proves that the requested operation is already
-satisfied. Idempotent modules use target commands such as `dpkg-query`,
-`pacman -Q`, `systemctl is-active`, `getent passwd`, etc. Explicit operations
-such as `upgrade`, `update`, `restart`, `reload`, and `daemon_reload` always
-report `updated` after successful command execution.
+- package names must not be empty, contain whitespace/control characters, or
+  start with `-`;
+- service and unit names must not be empty, contain whitespace/control
+  characters or `/`, or start with `-`;
+- user and group names must not be empty, contain whitespace/control characters,
+  contain `:` or `/`, or start with `-`.
 
-## App modules
+`mode` is an octal string accepted by `wali.builtin.lib.mode_bits`, such as
+`"0644"`. `owner` is an object in this form:
+
+```lua
+owner = { user = "root", group = "root" }
+```
+
+Either `user` or `group` may be omitted. Modules that expose `mode` and `owner`
+apply them while writing the file. Some file modules also enforce them when the
+file content already matches. Modules that do not expose these arguments never
+perform metadata-only changes.
+
+Command modules fail the task when validation, probing, or command execution
+fails. Idempotent modules first check the current state with the target system's
+own tools. Direct operations such as `update`, `upgrade`, `restart`, `reload`,
+and `daemon_reload` report a change after the command succeeds.
+
+## Module reference
 
 ### `ops.app.curl`
 
-Download one URL to a target-host file using `curl`.
+Downloads one URL with `curl`.
 
 Requires: `curl`.
 
 Arguments:
 
-| Argument         | Type                    | Default      | Description                                                                       |
-| ---------------- | ----------------------- | ------------ | --------------------------------------------------------------------------------- |
-| `url`            | string, required        | —            | URL passed to curl. Must be non-empty and must not contain control characters.    |
-| `dest`           | absolute path, required | —            | Destination file path on the target host.                                         |
-| `create_parents` | boolean                 | `false`      | Create the destination parent directory before downloading.                       |
-| `replace`        | boolean                 | `true`       | Replace an existing destination. If `false` and `dest` exists, no command is run. |
-| `timeout`        | string                  | host default | Command timeout for curl.                                                         |
-| `mode`           | string                  | nil          | Optional mode applied after a successful download.                                |
-| `owner`          | object                  | nil          | Optional owner applied after a successful download.                               |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `url` | yes | — | Non-empty URL. Control characters are rejected. |
+| `dest` | yes | — | Absolute destination path. |
+| `create_parents` | no | `false` | Create the destination parent directory first. |
+| `replace` | no | `true` | If `false` and `dest` exists, skip the download. |
+| `timeout` | no | host default | Timeout for the curl command. |
+| `mode` | no | nil | Mode applied after a successful download. |
+| `owner` | no | nil | Owner applied after a successful download. |
 
 Behavior:
 
-- If `replace = false` and `dest` exists, the module returns unchanged and does
-  not apply `mode`/`owner`.
-- Otherwise it optionally creates the parent directory, downloads to a temporary
-  file in the destination directory, renames the temporary file to `dest`, then
-  applies `mode`/`owner` if provided.
-- On curl or filesystem failure, it attempts to remove the temporary file before
-  failing.
+- Existing files are kept when `replace = false`; no metadata changes are made in
+  that case.
+- Downloads are written to a temporary file in the destination directory and then
+  renamed into place.
+- Temporary files are removed after a failed download when possible.
 
 Results:
 
-- Changed: download and rename completed; data is
-  `{ url = <url>, dest = <dest> }`; message is `downloaded file`.
-- Unchanged: destination already exists and `replace = false`.
-- Error: invalid input, missing parent when `create_parents = false`, curl
-  failure, rename failure, chmod/chown failure, or temporary file cleanup
-  failure that escapes wali filesystem handling.
+- changed: the file was downloaded and moved into place;
+- unchanged: `dest` already existed and `replace = false`;
+- error: invalid arguments, missing parent directory, failed curl command,
+  failed rename, or failed metadata update.
 
 ### `ops.app.wget`
 
-Download one URL to a target-host file using `wget`.
+Same contract as `ops.app.curl`, but uses `wget`.
 
 Requires: `wget`.
 
-Arguments, behavior, results, and corner cases are the same as `ops.app.curl`,
-except the download command is `wget --output-document <tmp> -- <url>`.
+The command form is `wget --output-document <tmp> -- <url>`.
 
-## File text modules
+## File modules
 
-The file modules operate on plain UTF-8 text. They are intentionally simple and
-literal. They do not parse INI, YAML, TOML, JSON, shell syntax, or
-service-specific configuration formats.
+These modules edit plain text. They do not try to understand INI, YAML, TOML,
+JSON, shell syntax, or service-specific configuration formats.
 
 ### `ops.file.line`
 
-Append an exact line to a text file when that line is missing.
+Ensures one exact line exists in a file.
 
 Arguments:
 
-| Argument         | Type                    | Default | Description                                                                                 |
-| ---------------- | ----------------------- | ------- | ------------------------------------------------------------------------------------------- |
-| `path`           | absolute path, required | —       | Target file path.                                                                           |
-| `line`           | string, required        | —       | Exact line to ensure. Must be non-empty and single-line; `\n` and `\r` are rejected.        |
-| `create`         | boolean                 | `true`  | Create the file if it is missing.                                                           |
-| `create_parents` | boolean                 | `false` | Create parent directories when creating the file.                                           |
-| `mode`           | string                  | nil     | Optional mode for a created or rewritten file; also enforced when the line already exists.  |
-| `owner`          | object                  | nil     | Optional owner for a created or rewritten file; also enforced when the line already exists. |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | yes | — | Absolute file path. |
+| `line` | yes | — | Non-empty single line. `\n` and `\r` are rejected. |
+| `create` | no | `true` | Create the file when missing. |
+| `create_parents` | no | `false` | Create parent directories when creating the file. |
+| `mode` | no | nil | Applied when the file is created, rewritten, or already correct. |
+| `owner` | no | nil | Applied when the file is created, rewritten, or already correct. |
 
 Behavior:
 
-- Exact-line matching is literal and line-based.
-- Existing files must be regular files.
-- If the file is missing and `create = true`, the file is created with
-  `line .. "\n"`.
-- If the file exists and already contains the exact line, content is unchanged;
-  optional metadata is still enforced.
-- If the file exists and does not contain the line, the line is appended. A
-  missing trailing newline is normalized before appending.
+- Matching is exact and line-based.
+- Existing paths must be regular files.
+- Missing files are created as `line .. "\n"` when `create = true`.
+- When the line already exists, content is left alone and optional metadata is
+  still checked.
+- When appending, a missing trailing newline is added before the new line.
 
-Results:
-
-- Changed: file created, line appended, or metadata changed.
-- Unchanged: line already exists and no metadata change is required.
-- Error: invalid path/line/mode/owner, missing file with `create = false`,
-  non-regular path, failed read/write/chmod/chown.
+Results: changed when the file is created, the line is appended, or metadata
+changes; unchanged when the line and metadata already match; error on invalid
+input, missing file with `create = false`, non-file paths, or filesystem failure.
 
 ### `ops.file.remove_line`
 
-Remove exact matching line occurrences from an existing text file.
+Removes exact line occurrences from an existing file.
 
 Arguments:
 
-| Argument     | Type                    | Default | Description                                                                          |
-| ------------ | ----------------------- | ------- | ------------------------------------------------------------------------------------ |
-| `path`       | absolute path, required | —       | Target file path.                                                                    |
-| `line`       | string, required        | —       | Exact line to remove. Must be non-empty and single-line; `\n` and `\r` are rejected. |
-| `all`        | boolean                 | `true`  | Remove all matching lines. If `false`, remove only the first current match.          |
-| `missing_ok` | boolean                 | `true`  | Treat a missing file as unchanged instead of failing.                                |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | yes | — | Absolute file path. |
+| `line` | yes | — | Non-empty single line. `\n` and `\r` are rejected. |
+| `all` | no | `true` | Remove all matches. If `false`, remove the first current match only. |
+| `missing_ok` | no | `true` | Treat a missing file as unchanged. |
 
 Behavior:
 
 - The module never creates files.
-- The module never changes file metadata; use `wali.builtin.permissions` for
-  metadata changes.
+- The module never changes file mode or ownership.
 - Matching is exact and line-based.
-- `all = false` is intentionally not globally idempotent when multiple matching
-  lines remain. Each apply removes one current match.
+- `all = false` is a one-match operation. If more matching lines remain, a later
+  apply can remove another one.
 - Existing paths must be regular files.
 
-Results:
-
-- Changed: at least one line was removed; data is `{ removals = <count> }`.
-- Unchanged: file is missing and `missing_ok = true`, or no exact line was
-  found; data is `{ removals = 0 }`.
-- Error: invalid path/line, missing file with `missing_ok = false`, non-regular
-  path, failed read/write.
+Result data includes `{ removals = <count> }`. The result is changed when at
+least one line is removed, unchanged when no line is removed, and an error on
+invalid input, missing file with `missing_ok = false`, non-file paths, or
+filesystem failure.
 
 ### `ops.file.replace`
 
-Replace literal text in an existing text file.
+Replaces literal text in an existing file.
 
 Arguments:
 
-| Argument  | Type                    | Default | Description                                                                             |
-| --------- | ----------------------- | ------- | --------------------------------------------------------------------------------------- |
-| `path`    | absolute path, required | —       | Target file path.                                                                       |
-| `find`    | string, required        | —       | Literal text to find. Must be non-empty.                                                |
-| `replace` | string, required        | —       | Literal replacement text. May be empty.                                                 |
-| `all`     | boolean                 | `true`  | Replace all current occurrences. If `false`, replace only the first current occurrence. |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | yes | — | Absolute file path. |
+| `find` | yes | — | Non-empty literal text to search for. |
+| `replace` | yes | — | Literal replacement text. May be empty. |
+| `all` | no | `true` | Replace all current matches. If `false`, replace only the first current match. |
 
 Behavior:
 
 - The module never creates files.
-- The module never changes file metadata; use `wali.builtin.permissions` for
-  metadata changes.
-- Matching is literal byte/string matching, not Lua pattern matching and not
-  regular expressions.
-- `all = false` is intentionally not globally idempotent when multiple matches
-  remain. Each apply replaces one current match.
+- The module never changes file mode or ownership.
+- `find` is literal text, not a Lua pattern and not a regular expression.
+- `all = false` is a one-match operation. If more matches remain, a later apply
+  can replace another one.
 - Existing paths must be regular files.
 
-Results:
-
-- Changed: at least one replacement was made; data is
-  `{ replacements = <count> }`.
-- Unchanged: `find` was not present; data is `{ replacements = 0 }`.
-- Error: invalid path/find, missing file, non-regular path, failed read/write.
+Result data includes `{ replacements = <count> }`. The result is changed when at
+least one replacement is made, unchanged when `find` is absent, and an error on
+invalid input, missing files, non-file paths, or filesystem failure.
 
 ### `ops.file.block`
 
-Create or replace one marked managed block in a text file.
+Manages one marked block in a text file.
 
 Arguments:
 
-| Argument         | Type                    | Default | Description                                                                                   |
-| ---------------- | ----------------------- | ------- | --------------------------------------------------------------------------------------------- |
-| `path`           | absolute path, required | —       | Target file path.                                                                             |
-| `marker`         | string, required        | —       | Marker label used in generated begin/end lines. Must be non-empty and single-line.            |
-| `content`        | string, required        | —       | Managed block content. May be multi-line. A missing final newline is added inside the block.  |
-| `comment_prefix` | string                  | `#`     | Prefix used for marker lines. Must be non-empty and single-line.                              |
-| `create`         | boolean                 | `true`  | Create the file if it is missing.                                                             |
-| `create_parents` | boolean                 | `false` | Create parent directories when creating the file.                                             |
-| `mode`           | string                  | nil     | Optional mode for a created or rewritten file; also enforced when the block already matches.  |
-| `owner`          | object                  | nil     | Optional owner for a created or rewritten file; also enforced when the block already matches. |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | yes | — | Absolute file path. |
+| `marker` | yes | — | Non-empty single-line marker label. |
+| `content` | yes | — | Block content. May span multiple lines. |
+| `comment_prefix` | no | `#` | Prefix for marker lines. Must be a single non-empty line. |
+| `create` | no | `true` | Create the file when missing. |
+| `create_parents` | no | `false` | Create parent directories when creating the file. |
+| `mode` | no | nil | Applied when the file is created, rewritten, or already correct. |
+| `owner` | no | nil | Applied when the file is created, rewritten, or already correct. |
 
-Generated marker form with the default prefix:
+With the default prefix, the generated block looks like this:
 
 ```text
 # BEGIN <marker>
@@ -268,315 +250,258 @@ Generated marker form with the default prefix:
 
 Behavior:
 
-- If the file is missing and `create = true`, the file is created with exactly
-  the generated block.
-- If the file exists and contains no generated block, the generated block is
-  appended. A missing trailing newline in the original file is normalized before
-  the append.
-- If the file contains exactly one begin marker followed by exactly one end
-  marker, that range is replaced.
-- If the existing block already matches, content is unchanged; optional metadata
-  is still enforced.
-- If markers are incomplete, reversed, nested, or duplicated, the module fails
-  instead of guessing.
-- `content` must not contain the generated begin or end marker text.
+- Missing files are created with just the generated block when `create = true`.
+- Files without the block get the block appended. A missing trailing newline is
+  added first.
+- Files with exactly one begin marker followed by exactly one end marker have
+  that range replaced.
+- Files with missing, reversed, nested, or duplicated markers fail instead of
+  guessing.
+- `content` must not contain the generated begin or end marker line.
 
-Results:
-
-- Changed: file created, block appended/replaced, or metadata changed; data is
-  `{ marker = <marker>, blocks = 1 }`.
-- Unchanged: one existing block already matches and no metadata change is
-  required; data contains the marker and existing block count.
-- Error: invalid path/marker/comment prefix/mode/owner, missing file with
-  `create = false`, non-regular path, marker corruption/duplication, failed
-  read/write/chmod/chown.
+Result data includes `{ marker = <marker>, blocks = 1 }` for changed writes and
+for a matching existing block. The module errors on invalid input, missing file
+with `create = false`, non-file paths, corrupted markers, or filesystem failure.
 
 ### `ops.file.key_value`
 
-Create or update one simple key/value line in a text file.
+Sets one simple key/value line.
 
 Arguments:
 
-| Argument         | Type                    | Default | Description                                                                                                       |
-| ---------------- | ----------------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `path`           | absolute path, required | —       | Target file path.                                                                                                 |
-| `key`            | string, required        | —       | Key name. Must be non-empty, single-line, contain no whitespace, and must not contain `=` when `separator = "="`. |
-| `value`          | string, required        | —       | Value text. May be empty but must be single-line.                                                                 |
-| `separator`      | string                  | `=`     | Either `=` or a single space (`" "`).                                                                             |
-| `comment_prefix` | string                  | `#`     | Lines whose trimmed form starts with this prefix are ignored. May be empty to disable comment handling.           |
-| `create`         | boolean                 | `true`  | Create the file if it is missing.                                                                                 |
-| `create_parents` | boolean                 | `false` | Create parent directories when creating the file.                                                                 |
-| `mode`           | string                  | nil     | Optional mode for a created or rewritten file; also enforced when the key already matches.                        |
-| `owner`          | object                  | nil     | Optional owner for a created or rewritten file; also enforced when the key already matches.                       |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | yes | — | Absolute file path. |
+| `key` | yes | — | Non-empty single-line key. Whitespace is rejected. With `separator = "="`, `=` is rejected too. |
+| `value` | yes | — | Single-line value. Empty string is allowed. |
+| `separator` | no | `=` | Either `=` or a single space (`" "`). |
+| `comment_prefix` | no | `#` | Trimmed lines starting with this prefix are ignored. Empty string disables comment handling. |
+| `create` | no | `true` | Create the file when missing. |
+| `create_parents` | no | `false` | Create parent directories when creating the file. |
+| `mode` | no | nil | Applied when the file is created, rewritten, or already correct. |
+| `owner` | no | nil | Applied when the file is created, rewritten, or already correct. |
 
 Behavior:
 
 - With `separator = "="`, the desired line is `key=value`.
 - With `separator = " "`, the desired line is `key value`.
-- Leading whitespace before an active key is tolerated during matching, but the
-  rewritten line is normalized to the desired form.
+- Leading whitespace before an active key is tolerated while matching, but the
+  final line is normalized to the desired form.
 - Commented lines are ignored and preserved.
-- If no active key is present, the desired line is appended.
-- If exactly one active key is present with a different value, that line is
-  replaced.
-- If exactly one active key is already equal to the desired line, content is
-  unchanged; optional metadata is still enforced.
-- If more than one active key is present, the module fails to avoid silently
-  choosing one.
+- No active key: append the desired line.
+- One active key with a different value: replace that line.
+- One matching active key: leave content alone and still check optional metadata.
+- More than one active key: fail, because silently choosing one would be unsafe.
 
-Results:
-
-- Changed: file created, key added, key updated, or metadata changed; data is
-  `{ key = <key>, action = "added" | "updated" | "unchanged" }`.
-- Unchanged: active key already matches and no metadata change is required; data
-  action is `"unchanged"`.
-- Error: invalid path/key/value/separator/comment prefix/mode/owner, missing
-  file with `create = false`, duplicate active keys, non-regular path, failed
-  read/write/chmod/chown.
+Result data includes `{ key = <key>, action = "added" | "updated" | "unchanged" }`.
+The module errors on invalid input, missing file with `create = false`, duplicate
+active keys, non-file paths, or filesystem failure.
 
 ## Package modules
 
-Package modules are thin wrappers around the system package manager. They
-intentionally do not auto-detect distributions and do not expose a generic
-declarative package resource. Choose the module that matches the target host.
+Package modules are small wrappers around the named package manager. They do not
+try to detect the distribution.
 
-All install/remove modules are idempotent when their package-query command gives
-reliable output. Update/upgrade modules are explicit operations and report
-`updated` after successful command execution.
+Install/remove modules probe package state first and can return unchanged.
+Update/upgrade modules run the command directly and return changed after a
+successful command.
 
-Result data for package modules is:
+Package result data has this shape:
 
 ```lua
 { action = "install" | "remove" | "update" | "upgrade", packages = { ... } }
 ```
 
-### APK (`ops.pkg.apk.*`)
+Package-name validation is shared: names must be non-empty, contain no
+whitespace or control characters, and must not start with `-`.
 
-| Module                | Requires | Arguments                                                                          | Command behavior                                                                                                   | Results and corner cases                                                                                                                     |
-| --------------------- | -------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ops.pkg.apk.install` | `apk`    | `packages` required list; `no_cache` boolean default `false`; `timeout`            | Probes each package with `apk info -e <name>`. Installs missing packages with `apk add [--no-cache] <missing...>`. | Unchanged when all packages are installed. Updated when any package is missing. Fails on invalid package names or failed `apk add`.          |
-| `ops.pkg.apk.remove`  | `apk`    | `packages` required list; `timeout`                                                | Probes with `apk info -e <name>`. Removes installed packages with `apk del <installed...>`.                        | Unchanged when all packages are absent. Updated when any package is installed. Fails on invalid package names or failed `apk del`.           |
-| `ops.pkg.apk.update`  | `apk`    | `timeout`                                                                          | Runs `apk update`.                                                                                                 | Always updated on command success. Fails on command failure.                                                                                 |
-| `ops.pkg.apk.upgrade` | `apk`    | `packages` optional non-empty list; `available` boolean default `false`; `timeout` | Runs `apk upgrade [--available] [packages...]`.                                                                    | Always updated on command success. If `packages` is omitted, upgrades generally according to apk defaults. Empty `packages = {}` is invalid. |
+### APK
 
-### APT (`ops.pkg.apt.*`)
+| Module | Requires | Arguments | Command behavior |
+| --- | --- | --- | --- |
+| `ops.pkg.apk.install` | `apk` | `packages` required; `no_cache=false`; `timeout` | Probe with `apk info -e <pkg>`. Install missing packages with `apk add [--no-cache] <missing...>`. |
+| `ops.pkg.apk.remove` | `apk` | `packages` required; `timeout` | Probe with `apk info -e <pkg>`. Remove installed packages with `apk del <installed...>`. |
+| `ops.pkg.apk.update` | `apk` | `timeout` | Run `apk update`. |
+| `ops.pkg.apk.upgrade` | `apk` | optional `packages`; `available=false`; `timeout` | Run `apk upgrade [--available] [packages...]`. Empty `packages = {}` is invalid. |
 
-| Module                | Requires                | Arguments                                                                                                  | Command behavior                                                                                                                                                                                                                           | Results and corner cases                                                                                                                                    |
-| --------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ops.pkg.apt.install` | `apt-get`, `dpkg-query` | `packages` required list; `no_install_recommends` boolean default `false`; `timeout`                       | Probes each package with `dpkg-query -W -f=${Status} <name>`. Installs missing packages with `apt-get install -y [--no-install-recommends] -- <missing...>`.                                                                               | Unchanged when all packages report `install ok installed`. Updated when any package is missing. Fails on invalid package names or failed `apt-get install`. |
-| `ops.pkg.apt.remove`  | `apt-get`, `dpkg-query` | `packages` required list; `purge` boolean default `false`; `autoremove` boolean default `false`; `timeout` | Probes with `dpkg-query`. Removes installed packages with `apt-get remove -y -- <installed...>` or purges with `apt-get purge -y -- <installed...>`. If `autoremove = true`, runs `apt-get autoremove -y` after a successful remove/purge. | Unchanged when all packages are absent. Updated when any package is installed. `autoremove` is not run when no package removal was needed.                  |
-| `ops.pkg.apt.update`  | `apt-get`               | `timeout`                                                                                                  | Runs `apt-get update`.                                                                                                                                                                                                                     | Always updated on command success. Fails on command failure.                                                                                                |
-| `ops.pkg.apt.upgrade` | `apt-get`               | `packages` optional non-empty list; `dist` boolean default `false`; `timeout`                              | With packages, runs `apt-get install --only-upgrade -y -- <packages...>`. Without packages and `dist = true`, runs `apt-get dist-upgrade -y`. Without packages and `dist = false`, runs `apt-get upgrade -y`.                              | Always updated on command success. Empty `packages = {}` is invalid.                                                                                        |
+### APT
 
-### Pacman (`ops.pkg.pacman.*`)
+| Module | Requires | Arguments | Command behavior |
+| --- | --- | --- | --- |
+| `ops.pkg.apt.install` | `apt-get`, `dpkg-query` | `packages` required; `no_install_recommends=false`; `timeout` | Probe with `dpkg-query -W -f=${Status} <pkg>`. Install missing packages with `apt-get install -y [--no-install-recommends] -- <missing...>`. |
+| `ops.pkg.apt.remove` | `apt-get`, `dpkg-query` | `packages` required; `purge=false`; `autoremove=false`; `timeout` | Probe with `dpkg-query`. Remove or purge installed packages. If something was removed and `autoremove=true`, run `apt-get autoremove -y`. |
+| `ops.pkg.apt.update` | `apt-get` | `timeout` | Run `apt-get update`. |
+| `ops.pkg.apt.upgrade` | `apt-get` | optional `packages`; `dist=false`; `timeout` | Without `packages`, run `apt-get upgrade -y` or `apt-get dist-upgrade -y`. With `packages`, run `apt-get install --only-upgrade -y -- <packages...>`. Empty `packages = {}` is invalid. |
 
-| Module                   | Requires | Arguments                                                                                                  | Command behavior                                                                                                                                                                                   | Results and corner cases                                                                                                          |
-| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `ops.pkg.pacman.install` | `pacman` | `packages` required list; `refresh` boolean default `false`; `timeout`                                     | Probes each package with `pacman -Q <name>`. Installs missing packages with `pacman -S --noconfirm --needed <missing...>` or `pacman -Sy --noconfirm --needed <missing...>` when `refresh = true`. | Unchanged when all packages are installed. Updated when any package is missing. Fails on invalid package names or failed install. |
-| `ops.pkg.pacman.remove`  | `pacman` | `packages` required list; `recursive` boolean default `false`; `nosave` boolean default `false`; `timeout` | Probes with `pacman -Q <name>`. Removes installed packages with `pacman -R --noconfirm [--recursive] [--nosave] <installed...>`.                                                                   | Unchanged when all packages are absent. Updated when any package is installed.                                                    |
-| `ops.pkg.pacman.update`  | `pacman` | `timeout`                                                                                                  | Runs `pacman -Sy --noconfirm`.                                                                                                                                                                     | Always updated on command success. Fails on command failure.                                                                      |
-| `ops.pkg.pacman.upgrade` | `pacman` | `packages` optional non-empty list; `timeout`                                                              | With packages, runs `pacman -S --noconfirm <packages...>`. Without packages, runs `pacman -Syu --noconfirm`.                                                                                       | Always updated on command success. Empty `packages = {}` is invalid.                                                              |
+APT commands are run with `DEBIAN_FRONTEND=noninteractive`.
 
-### XBPS (`ops.pkg.xbps.*`)
+### pacman
 
-| Module                 | Requires                     | Arguments                                                                     | Command behavior                                                                                                  | Results and corner cases                                                        |
-| ---------------------- | ---------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `ops.pkg.xbps.install` | `xbps-install`, `xbps-query` | `packages` required list; `sync` boolean default `false`; `timeout`           | Probes each package with `xbps-query <name>`. Installs missing packages with `xbps-install -y [-S] <missing...>`. | Unchanged when all packages are installed. Updated when any package is missing. |
-| `ops.pkg.xbps.remove`  | `xbps-remove`, `xbps-query`  | `packages` required list; `recursive` boolean default `false`; `timeout`      | Probes with `xbps-query <name>`. Removes installed packages with `xbps-remove -y [-R] <installed...>`.            | Unchanged when all packages are absent. Updated when any package is installed.  |
-| `ops.pkg.xbps.update`  | `xbps-install`               | `timeout`                                                                     | Runs `xbps-install -S`.                                                                                           | Always updated on command success. Fails on command failure.                    |
-| `ops.pkg.xbps.upgrade` | `xbps-install`               | `packages` optional non-empty list; `sync` boolean default `false`; `timeout` | Runs `xbps-install -y -u [-S] [packages...]`.                                                                     | Always updated on command success. Empty `packages = {}` is invalid.            |
+| Module | Requires | Arguments | Command behavior |
+| --- | --- | --- | --- |
+| `ops.pkg.pacman.install` | `pacman` | `packages` required; `refresh=false`; `timeout` | Probe with `pacman -Q <pkg>`. Install missing packages with `pacman -S` or `pacman -Sy`, always using `--noconfirm --needed`. |
+| `ops.pkg.pacman.remove` | `pacman` | `packages` required; `recursive=false`; `nosave=false`; `timeout` | Probe with `pacman -Q <pkg>`. Remove installed packages with `pacman -R` or `pacman -Rs`, always using `--noconfirm`; add `--nosave` when requested. |
+| `ops.pkg.pacman.update` | `pacman` | `timeout` | Run `pacman -Sy --noconfirm`. |
+| `ops.pkg.pacman.upgrade` | `pacman` | optional `packages`; `timeout` | Without `packages`, run `pacman -Syu --noconfirm`. With `packages`, run `pacman -S --noconfirm <packages...>`. Empty `packages = {}` is invalid. |
+
+### XBPS
+
+| Module | Requires | Arguments | Command behavior |
+| --- | --- | --- | --- |
+| `ops.pkg.xbps.install` | `xbps-install`, `xbps-query` | `packages` required; `sync=false`; `timeout` | Probe with `xbps-query <pkg>`. Install missing packages with `xbps-install -y [-S] <missing...>`. |
+| `ops.pkg.xbps.remove` | `xbps-remove`, `xbps-query` | `packages` required; `recursive=false`; `timeout` | Probe with `xbps-query <pkg>`. Remove installed packages with `xbps-remove -y [-R] <installed...>`. |
+| `ops.pkg.xbps.update` | `xbps-install` | `timeout` | Run `xbps-install -S`. |
+| `ops.pkg.xbps.upgrade` | `xbps-install` | optional `packages`; `sync=false`; `timeout` | Run `xbps-install -u -y [-S] [packages...]`. Empty `packages = {}` is invalid. |
 
 ## Service modules
 
-Service modules are backend-specific. They do not abstract across init systems.
-Choose the service manager explicitly.
+Service modules validate service names and pass them to the selected service
+manager. `start`, `stop`, `enable`, and `disable` are idempotent when the
+backend has a simple status check. `restart`, `reload`, and `daemon_reload` are
+direct operations and return changed after a successful command.
 
-### systemd (`ops.service.systemd.*`)
+Service result data is usually:
 
-All systemd modules require `systemctl`. The common arguments are `unit`
-(required string) and `timeout` (optional string), except `daemon_reload`, which
-only accepts `timeout`.
+```lua
+{ service = <name>, action = <action> }
+```
 
-| Module                              | Behavior                                                                                          | Results and corner cases                                                                                                                               |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ops.service.systemd.start`         | Runs `systemctl is-active --quiet <unit>` first. If inactive, runs `systemctl start <unit>`.      | Unchanged when already active. Updated when `start` succeeds. Fails on invalid unit or command failure. Data is `{ unit = <unit>, action = "start" }`. |
-| `ops.service.systemd.stop`          | Runs `systemctl is-active --quiet <unit>` first. If active, runs `systemctl stop <unit>`.         | Unchanged when already inactive. Updated when `stop` succeeds. Data action is `"stop"`.                                                                |
-| `ops.service.systemd.enable`        | Runs `systemctl is-enabled --quiet <unit>` first. If not enabled, runs `systemctl enable <unit>`. | Unchanged when already enabled. Updated when `enable` succeeds. Data action is `"enable"`.                                                             |
-| `ops.service.systemd.disable`       | Runs `systemctl is-enabled --quiet <unit>` first. If enabled, runs `systemctl disable <unit>`.    | Unchanged when already disabled. Updated when `disable` succeeds. Data action is `"disable"`.                                                          |
-| `ops.service.systemd.restart`       | Runs `systemctl restart <unit>`.                                                                  | Always updated on command success. Data action is `"restart"`.                                                                                         |
-| `ops.service.systemd.reload`        | Runs `systemctl reload <unit>`.                                                                   | Always updated on command success. Data action is `"reload"`.                                                                                          |
-| `ops.service.systemd.daemon_reload` | Runs `systemctl daemon-reload`.                                                                   | Always updated on command success. Data action is `"daemon_reload"`.                                                                                   |
+For systemd, the key is `unit` instead of `service`.
 
-### dinit (`ops.service.dinit.*`)
+### systemd
 
-All dinit modules require `dinitctl`. Common arguments are `service` (required
-string) and `timeout` (optional string).
+Requires: `systemctl`.
 
-| Module                      | Behavior                                                                                             | Results and corner cases                                                                                           |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `ops.service.dinit.start`   | Runs `dinitctl --quiet is-started <service>` first. If not started, runs `dinitctl start <service>`. | Unchanged when already active. Updated when `start` succeeds. Data is `{ service = <service>, action = "start" }`. |
-| `ops.service.dinit.stop`    | Runs `dinitctl --quiet is-started <service>` first. If started, runs `dinitctl stop <service>`.      | Unchanged when already inactive. Updated when `stop` succeeds. Data action is `"stop"`.                            |
-| `ops.service.dinit.enable`  | Runs `dinitctl enable <service>`.                                                                    | Always updated on command success. Data action is `"enable"`.                                                      |
-| `ops.service.dinit.disable` | Runs `dinitctl disable <service>`.                                                                   | Always updated on command success. Data action is `"disable"`.                                                     |
-| `ops.service.dinit.restart` | Runs `dinitctl restart <service>`.                                                                   | Always updated on command success. Data action is `"restart"`.                                                     |
+| Module | Arguments | Behavior |
+| --- | --- | --- |
+| `ops.service.systemd.start` | `unit` required; `timeout` | If `systemctl is-active --quiet <unit>` succeeds, unchanged. Otherwise run `systemctl start <unit>`. |
+| `ops.service.systemd.stop` | `unit` required; `timeout` | If `is-active` fails, unchanged. Otherwise run `systemctl stop <unit>`. |
+| `ops.service.systemd.enable` | `unit` required; `timeout` | If `systemctl is-enabled --quiet <unit>` succeeds, unchanged. Otherwise run `systemctl enable <unit>`. |
+| `ops.service.systemd.disable` | `unit` required; `timeout` | If `is-enabled` fails, unchanged. Otherwise run `systemctl disable <unit>`. |
+| `ops.service.systemd.restart` | `unit` required; `timeout` | Run `systemctl restart <unit>`. |
+| `ops.service.systemd.reload` | `unit` required; `timeout` | Run `systemctl reload <unit>`. |
+| `ops.service.systemd.daemon_reload` | `timeout` | Run `systemctl daemon-reload`. |
 
-### runit (`ops.service.runit.*`)
+### dinit
 
-There are two groups of runit modules: `sv` command modules and symlink
-enable/disable modules.
+Requires: `dinitctl`.
 
-#### `sv` modules
+| Module | Arguments | Behavior |
+| --- | --- | --- |
+| `ops.service.dinit.start` | `service` required; `timeout` | If `dinitctl --quiet is-started <service>` succeeds, unchanged. Otherwise run `dinitctl start <service>`. |
+| `ops.service.dinit.stop` | `service` required; `timeout` | If `is-started` fails, unchanged. Otherwise run `dinitctl stop <service>`. |
+| `ops.service.dinit.enable` | `service` required; `timeout` | Run `dinitctl enable <service>`. |
+| `ops.service.dinit.disable` | `service` required; `timeout` | Run `dinitctl disable <service>`. |
+| `ops.service.dinit.restart` | `service` required; `timeout` | Run `dinitctl restart <service>`. |
 
-Modules: `ops.service.runit.start`, `ops.service.runit.stop`,
-`ops.service.runit.restart`.
+### runit: `sv` modules
 
 Requires: `sv`.
 
-Arguments:
+| Module | Arguments | Behavior |
+| --- | --- | --- |
+| `ops.service.runit.start` | `service` required; `service_dir=/var/service`; `timeout` | Probe `sv status <service_dir>/<service>`. Output starting with `run:` is already active; otherwise run `sv up <path>`. |
+| `ops.service.runit.stop` | `service` required; `service_dir=/var/service`; `timeout` | Probe `sv status <path>`. Non-`run:` output is already inactive; otherwise run `sv down <path>`. |
+| `ops.service.runit.restart` | `service` required; `service_dir=/var/service`; `timeout` | Run `sv restart <path>`. |
 
-| Argument      | Type             | Default        | Description                                                                             |
-| ------------- | ---------------- | -------------- | --------------------------------------------------------------------------------------- |
-| `service`     | string, required | —              | Service name under `service_dir`. Must be a safe service name and must not contain `/`. |
-| `service_dir` | absolute path    | `/var/service` | Active runit service directory.                                                         |
-| `timeout`     | string           | host default   | Command timeout.                                                                        |
+`service_dir` must be absolute. `service` is a name under that directory, not a
+path.
 
-Behavior:
+### runit: symlink modules
 
-- `start` probes `sv status <service_dir>/<service>` and treats output starting
-  with `run:` as already active. Otherwise it runs `sv up <path>`.
-- `stop` probes `sv status <path>` and treats output not starting with `run:` as
-  already inactive. Otherwise it runs `sv down <path>`.
-- `restart` runs `sv restart <path>` without a pre-check.
+| Module | Arguments | Behavior |
+| --- | --- | --- |
+| `ops.service.runit.enable` | `name` required; `source_dir=/etc/sv`; `service_dir=/var/service` | Create `<service_dir>/<name>` as a symlink to `<source_dir>/<name>`. If the expected symlink already exists, unchanged. If another path exists there, fail. |
+| `ops.service.runit.disable` | `name` required; `service_dir=/var/service` | Remove `<service_dir>/<name>` if it is a symlink. Missing links are unchanged. Non-symlink paths fail. |
 
-Results:
-
-- `start`/`stop` may be unchanged or updated depending on the status probe.
-- `restart` is always updated on command success.
-- Data is `{ service = <service>, action = "start" | "stop" | "restart" }`.
-- Errors include invalid service/service_dir or failed `sv` command.
-
-#### Symlink modules
-
-Modules: `ops.service.runit.enable`, `ops.service.runit.disable`.
-
-Arguments:
-
-| Module                      | Arguments                                                                                                                | Behavior                                                                  | Results and corner cases                                                                                                                                                                                                             |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ops.service.runit.enable`  | `name` required string; `source_dir` absolute path default `/etc/sv`; `service_dir` absolute path default `/var/service` | Creates symlink `<service_dir>/<name>` pointing to `<source_dir>/<name>`. | Unchanged if the expected symlink already exists. Updated when symlink is created. Fails if the target path exists and is not the expected symlink. Data is `{ service = <name>, source = <source>, link = <link> }` when unchanged. |
-| `ops.service.runit.disable` | `name` required string; `service_dir` absolute path default `/var/service`                                               | Removes symlink `<service_dir>/<name>`.                                   | Unchanged if the link is absent. Updated when symlink is removed. Fails if the path exists and is not a symlink. Data is `{ service = <name>, link = <link> }` when unchanged.                                                       |
-
-`name` must not contain `/`.
+Enable/disable result data includes the link path. Enable also includes the
+source path.
 
 ## User modules
 
-User modules are thin wrappers around `getent`, `useradd`, `userdel`, and
-`usermod`. They do not parse `/etc/passwd` directly.
+User modules use `getent` for existence checks and then call `useradd`,
+`userdel`, or `usermod`. They do not edit `/etc/passwd` directly.
 
 ### `ops.user.create`
-
-Create a local user account when it does not already exist.
 
 Requires: `getent`, `useradd`.
 
 Arguments:
 
-| Argument      | Type             | Default      | Description                                                                               |
-| ------------- | ---------------- | ------------ | ----------------------------------------------------------------------------------------- |
-| `name`        | string, required | —            | User name.                                                                                |
-| `uid`         | integer          | nil          | Passed as `--uid`.                                                                        |
-| `group`       | string           | nil          | Primary group, passed as `--gid`.                                                         |
-| `groups`      | list of strings  | nil          | Supplementary groups, passed as comma-separated `--groups`.                               |
-| `home`        | absolute path    | nil          | Home directory, passed as `--home-dir`.                                                   |
-| `create_home` | boolean          | nil          | `true` passes `--create-home`; `false` passes `--no-create-home`; omitted passes neither. |
-| `shell`       | absolute path    | nil          | Login shell, passed as `--shell`.                                                         |
-| `comment`     | string           | nil          | GECOS/comment, passed as `--comment`.                                                     |
-| `system`      | boolean          | `false`      | Pass `--system`.                                                                          |
-| `timeout`     | string           | host default | Command timeout.                                                                          |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `name` | yes | — | User name. |
+| `uid` | no | nil | Passed as `--uid`. |
+| `group` | no | nil | Primary group, passed as `--gid`. |
+| `groups` | no | nil | Supplementary groups, passed as comma-separated `--groups`. |
+| `home` | no | nil | Absolute path, passed as `--home-dir`. |
+| `create_home` | no | nil | `true` passes `--create-home`; `false` passes `--no-create-home`; omitted passes neither. |
+| `shell` | no | nil | Absolute path, passed as `--shell`. |
+| `comment` | no | nil | Passed as `--comment`. |
+| `system` | no | `false` | Pass `--system`. |
+| `timeout` | no | host default | Command timeout. |
 
-Behavior and results:
-
-- Probes with `getent passwd <name>`.
-- If the user exists, returns unchanged with data `{ user = <name> }`.
-- If absent, runs `useradd` with the requested options and returns updated with
-  data `{ user = <name> }`.
-- Fails on invalid names/paths or command failure.
+If `getent passwd <name>` succeeds, the result is unchanged. Otherwise the module
+runs `useradd` and returns changed. Result data is `{ user = <name> }`.
 
 ### `ops.user.remove`
-
-Remove a local user account when it exists.
 
 Requires: `getent`, `userdel`.
 
 Arguments:
 
-| Argument      | Type             | Default      | Description      |
-| ------------- | ---------------- | ------------ | ---------------- |
-| `name`        | string, required | —            | User name.       |
-| `remove_home` | boolean          | `false`      | Pass `--remove`. |
-| `force`       | boolean          | `false`      | Pass `--force`.  |
-| `timeout`     | string           | host default | Command timeout. |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `name` | yes | — | User name. |
+| `remove_home` | no | `false` | Pass `--remove`. |
+| `force` | no | `false` | Pass `--force`. |
+| `timeout` | no | host default | Command timeout. |
 
-Behavior and results:
-
-- Probes with `getent passwd <name>`.
-- If absent, returns unchanged with data `{ user = <name> }`.
-- If present, runs `userdel [--force] [--remove] <name>` and returns updated
-  with data `{ user = <name> }`.
-- Fails on invalid names or command failure.
+If the user is already absent, the result is unchanged. Otherwise the module runs
+`userdel [--force] [--remove] <name>` and returns changed. Result data is
+`{ user = <name> }`.
 
 ### `ops.user.update`
-
-Update an existing local user account.
 
 Requires: `getent`, `usermod`.
 
 Arguments:
 
-| Argument        | Type             | Default      | Description                                                 |
-| --------------- | ---------------- | ------------ | ----------------------------------------------------------- |
-| `name`          | string, required | —            | User name.                                                  |
-| `uid`           | integer          | nil          | Passed as `--uid`.                                          |
-| `group`         | string           | nil          | Primary group, passed as `--gid`.                           |
-| `groups`        | list of strings  | nil          | Supplementary groups, passed as comma-separated `--groups`. |
-| `append_groups` | boolean          | `false`      | Pass `--append`; requires `groups`.                         |
-| `home`          | absolute path    | nil          | Home directory, passed as `--home`.                         |
-| `move_home`     | boolean          | `false`      | Pass `--move-home`; requires `home`.                        |
-| `shell`         | absolute path    | nil          | Login shell, passed as `--shell`.                           |
-| `comment`       | string           | nil          | GECOS/comment, passed as `--comment`.                       |
-| `lock`          | boolean          | `false`      | Pass `--lock`. Mutually exclusive with `unlock`.            |
-| `unlock`        | boolean          | `false`      | Pass `--unlock`. Mutually exclusive with `lock`.            |
-| `timeout`       | string           | host default | Command timeout.                                            |
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `name` | yes | — | User name. |
+| `uid` | no | nil | Passed as `--uid`. |
+| `group` | no | nil | Primary group, passed as `--gid`. |
+| `groups` | no | nil | Supplementary groups, passed as comma-separated `--groups`. |
+| `append_groups` | no | `false` | Pass `--append`; requires `groups`. |
+| `home` | no | nil | Absolute path, passed as `--home`. |
+| `move_home` | no | `false` | Pass `--move-home`; requires `home`. |
+| `shell` | no | nil | Absolute path, passed as `--shell`. |
+| `comment` | no | nil | Passed as `--comment`. |
+| `lock` | no | `false` | Pass `--lock`; mutually exclusive with `unlock`. |
+| `unlock` | no | `false` | Pass `--unlock`; mutually exclusive with `lock`. |
+| `timeout` | no | host default | Command timeout. |
 
-Behavior and results:
-
-- Requires at least one update option besides `name`/`timeout`.
-- Probes with `getent passwd <name>` and fails if the user does not exist.
-- Runs `usermod` with the requested options and returns updated with data
-  `{ user = <name> }`.
-- This module does not attempt to determine whether requested fields already
-  match the current account. A successful `usermod` is reported as updated.
-- Fails on invalid names/paths, mutually exclusive `lock`/`unlock`, missing
-  dependent options, absent user, or command failure.
+At least one update option is required. The module fails if the user does not
+exist. It does not inspect the current account fields; a successful `usermod` is
+reported as changed. Result data is `{ user = <name> }`.
 
 ## Tests
 
-`wali-ops` tests are black-box shell tests. They create temporary manifests,
-point wali at this repository's `modules/` directory, and prepend fake target
-commands to `PATH` so command arguments and idempotence branches can be checked
-without touching the host package or service manager.
+The tests are black-box shell tests. They write temporary manifests, point wali
+at this repository's `modules/` directory, and place fake package/service/user
+commands at the front of `PATH`.
 
-Run them with a wali binary on `PATH`:
+Run all tests with a wali binary on `PATH`:
 
 ```sh
 tests/run.sh
 ```
 
-Or point the harness at an explicit binary:
+Or provide the binary explicitly:
 
 ```sh
 WALI_BIN=/path/to/wali tests/run.sh
 ```
 
-The harness is written for POSIX `sh` and avoids Bash, Python, `jq`, and other
-non-essential test dependencies.
+The harness is POSIX `sh` and avoids Bash, Python, `jq`, and similar extras.

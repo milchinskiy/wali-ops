@@ -25,7 +25,7 @@ end
 
 return {
 	name = "curl download",
-	description = "Download one URL to a target-host file using curl.",
+	description = "Download a URL to a file with curl.",
 	requires = { command = "curl" },
 
 	schema = {

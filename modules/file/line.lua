@@ -27,7 +27,7 @@ end
 
 return {
 	name = "file line",
-	description = "Append an exact line to a UTF-8 text file when it is missing.",
+	description = "Ensure one exact line exists.",
 
 	schema = {
 		type = "object",

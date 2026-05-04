@@ -121,7 +121,7 @@ end
 
 return {
 	name = "file key value",
-	description = "Create or update one simple key/value line in a UTF-8 text file.",
+	description = "Set one simple key/value line.",
 
 	schema = {
 		type = "object",

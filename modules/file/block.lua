@@ -96,7 +96,7 @@ end
 
 return {
 	name = "file block",
-	description = "Create or replace one marked block in a UTF-8 text file.",
+	description = "Manage one marked text block.",
 
 	schema = {
 		type = "object",
