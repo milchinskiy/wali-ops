@@ -1,4 +1,5 @@
 #!/bin/sh
+
 set -eu
 . "${TEST_LIB:?}"
 
@@ -116,3 +117,93 @@ MANIFEST
 run_wali_apply_failure
 assert_output_contains "must not contain '/'"
 assert_command_not_logged 'sv [up]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "dinit-stop-stopped",
+			module = "ops.service.dinit.stop",
+			args = { service = "stopped" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'dinitctl [--quiet] [is-started] [stopped]'
+assert_command_not_logged 'dinitctl [stop] [stopped]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "dinit-stop-running",
+			module = "ops.service.dinit.stop",
+			args = { service = "running" },
+		},
+		{
+			id = "dinit-enable",
+			module = "ops.service.dinit.enable",
+			args = { service = "demo" },
+		},
+		{
+			id = "dinit-disable",
+			module = "ops.service.dinit.disable",
+			args = { service = "demo" },
+		},
+		{
+			id = "dinit-restart",
+			module = "ops.service.dinit.restart",
+			args = { service = "demo" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'dinitctl [stop] [running]'
+assert_command_logged 'dinitctl [enable] [demo]'
+assert_command_logged 'dinitctl [disable] [demo]'
+assert_command_logged 'dinitctl [restart] [demo]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<MANIFEST
+		{
+			id = "runit-stop-stopped",
+			module = "ops.service.runit.stop",
+			args = { service = "stopped", service_dir = $(lua_quote "$service_dir") },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged "sv [status] [$service_dir/stopped]"
+assert_command_not_logged "sv [down] [$service_dir/stopped]"
+
+reset_command_log
+{
+	manifest_header
+	cat <<MANIFEST
+		{
+			id = "runit-stop-running",
+			module = "ops.service.runit.stop",
+			args = { service = "running", service_dir = $(lua_quote "$service_dir") },
+		},
+		{
+			id = "runit-restart",
+			module = "ops.service.runit.restart",
+			args = { service = "running", service_dir = $(lua_quote "$service_dir") },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged "sv [down] [$service_dir/running]"
+assert_command_logged "sv [restart] [$service_dir/running]"

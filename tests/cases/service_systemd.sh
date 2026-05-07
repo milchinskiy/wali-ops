@@ -1,4 +1,5 @@
 #!/bin/sh
+
 set -eu
 . "${TEST_LIB:?}"
 
@@ -120,3 +121,99 @@ MANIFEST
 run_wali_apply_failure
 assert_output_contains "must not contain '/'"
 assert_command_not_logged 'systemctl [start]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "stop-inactive",
+			module = "ops.service.systemd.stop",
+			args = { unit = "inactive.service" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'systemctl [is-active] [--quiet] [inactive.service]'
+assert_command_not_logged 'systemctl [stop] [inactive.service]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "stop-active",
+			module = "ops.service.systemd.stop",
+			args = { unit = "active.service" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'systemctl [is-active] [--quiet] [active.service]'
+assert_command_logged 'systemctl [stop] [active.service]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "disable-disabled",
+			module = "ops.service.systemd.disable",
+			args = { unit = "disabled.service" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'systemctl [is-enabled] [--quiet] [disabled.service]'
+assert_command_not_logged 'systemctl [disable] [disabled.service]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "disable-enabled",
+			module = "ops.service.systemd.disable",
+			args = { unit = "enabled.service" },
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'systemctl [is-enabled] [--quiet] [enabled.service]'
+assert_command_logged 'systemctl [disable] [enabled.service]'
+
+reset_command_log
+{
+	manifest_header
+	cat <<'MANIFEST'
+		{
+			id = "restart-unit",
+			module = "ops.service.systemd.restart",
+			args = { unit = "demo.service" },
+		},
+		{
+			id = "reload-unit",
+			module = "ops.service.systemd.reload",
+			args = { unit = "demo.service" },
+		},
+		{
+			id = "daemon-reload",
+			module = "ops.service.systemd.daemon_reload",
+			args = {},
+		},
+MANIFEST
+	manifest_footer
+} >"$TEST_MANIFEST"
+
+run_wali_apply
+assert_command_logged 'systemctl [restart] [demo.service]'
+assert_command_logged 'systemctl [reload] [demo.service]'
+assert_command_logged 'systemctl [daemon-reload]'
