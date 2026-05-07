@@ -37,6 +37,9 @@ local function validate_name(value, field)
 	if value:find("/", 1, true) ~= nil then
 		return lib.validation_error(field .. " must not contain '/'")
 	end
+	if value:find(",", 1, true) ~= nil then
+		return lib.validation_error(field .. " must not contain ','")
+	end
 	return nil
 end
 
@@ -48,6 +51,9 @@ local function validate_args(ctx, args)
 	local err = validate_name(args.name, "name")
 	if err ~= nil then
 		return err
+	end
+	if args.uid ~= nil and args.uid < 0 then
+		return lib.validation_error("uid must be zero or greater")
 	end
 	if args.group ~= nil then
 		err = validate_name(args.group, "group")

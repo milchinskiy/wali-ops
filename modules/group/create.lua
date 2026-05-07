@@ -37,6 +37,9 @@ local function validate_name(value, field)
 	if value:find("/", 1, true) ~= nil then
 		return lib.validation_error(field .. " must not contain '/'")
 	end
+	if value:find(",", 1, true) ~= nil then
+		return lib.validation_error(field .. " must not contain ','")
+	end
 	return nil
 end
 
