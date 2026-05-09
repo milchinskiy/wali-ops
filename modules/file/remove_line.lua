@@ -1,3 +1,4 @@
+require("compat")
 local lib = require("wali.builtin.lib")
 
 local function validate_non_empty(value, field)
@@ -96,7 +97,7 @@ return {
 			args.path,
 			updated,
 			lib.write_file_opts({
-				create_parents = false,
+				parents = false,
 				replace = true,
 			})
 		))

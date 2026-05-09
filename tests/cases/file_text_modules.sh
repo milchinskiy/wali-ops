@@ -92,7 +92,7 @@ block_file=$TEST_SANDBOX/nested/block.conf
 				marker = "wali demo",
 				content = [[alpha
 beta]],
-				create_parents = true,
+				parents = true,
 			},
 		},
 MANIFEST
@@ -169,7 +169,7 @@ key_file=$TEST_SANDBOX/nested/settings.conf
 				path = $(lua_quote "$key_file"),
 				key = "Port",
 				value = "22",
-				create_parents = true,
+				parents = true,
 			},
 		},
 MANIFEST

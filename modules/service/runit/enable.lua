@@ -1,3 +1,4 @@
+require("compat")
 local lib = require("wali.builtin.lib")
 
 local function validate_service_name(name, field)

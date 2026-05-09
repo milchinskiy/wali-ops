@@ -44,7 +44,7 @@ dest=$TEST_SANDBOX/downloads/file.txt
 			args = {
 				url = "https://example.invalid/file.txt",
 				dest = $(lua_quote "$dest"),
-				create_parents = true,
+				parents = true,
 			},
 		},
 MANIFEST
@@ -87,7 +87,7 @@ fail_dest=$TEST_SANDBOX/downloads/fail.txt
 			args = {
 				url = "https://example.invalid/fail.txt",
 				dest = $(lua_quote "$fail_dest"),
-				create_parents = true,
+				parents = true,
 			},
 		},
 MANIFEST

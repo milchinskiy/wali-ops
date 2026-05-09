@@ -17,6 +17,12 @@ There is no generic `package` or `service` resource here. If a host uses APT,
 use an APT module. If it uses systemd, use a systemd module. That keeps the
 module behavior easy to read and close to the command that will actually run.
 
+## Compatibility
+
+This branch requires Wali `>=0.2.0 <0.3.0`. The modules check the running Wali
+runtime with `require("wali").require_version(...)` when they are loaded, so an
+incompatible Wali binary fails early and clearly.
+
 ## Using this repository from wali
 
 Point a wali manifest at the `modules/` directory and choose a namespace:
@@ -103,20 +109,20 @@ Requires: `curl`.
 
 Arguments:
 
-| Argument         | Required | Default      | Notes                                            |
-| ---------------- | -------- | ------------ | ------------------------------------------------ |
-| `url`            | yes      | —            | Non-empty URL. Control characters are rejected.  |
-| `dest`           | yes      | —            | Absolute destination path.                       |
-| `create_parents` | no       | `false`      | Create the destination parent directory first.   |
-| `replace`        | no       | `true`       | If `false` and `dest` exists, skip the download. |
-| `timeout`        | no       | host default | Timeout for the curl command.                    |
-| `mode`           | no       | nil          | Mode applied after a successful download.        |
-| `owner`          | no       | nil          | Owner applied after a successful download.       |
+| Argument  | Required | Default      | Notes                                            |
+| --------- | -------- | ------------ | ------------------------------------------------ |
+| `url`     | yes      | —            | Non-empty URL. Control characters are rejected.  |
+| `dest`    | yes      | —            | Absolute destination path.                       |
+| `parents` | no       | `false`      | Create the destination parent directory first.   |
+| `replace` | no       | `true`       | If `false` and `dest` exists, skip the download. |
+| `timeout` | no       | host default | Timeout for the curl command.                    |
+| `mode`    | no       | nil          | Mode applied after a successful download.        |
+| `owner`   | no       | nil          | Owner applied after a successful download.       |
 
 Behavior:
 
-- Existing files are kept when `replace = false`; no metadata changes are made
-  in that case.
+- Existing files are kept when `replace = false`; the task is skipped and no
+  metadata changes are made in that case.
 - Downloads are written to a temporary file in the destination directory and
   then renamed into place.
 - Temporary files are removed after a failed download when possible.
@@ -124,7 +130,7 @@ Behavior:
 Results:
 
 - changed: the file was downloaded and moved into place;
-- unchanged: `dest` already existed and `replace = false`;
+- skipped: `dest` already existed and `replace = false`;
 - error: invalid arguments, missing parent directory, failed curl command,
   failed rename, or failed metadata update.
 
@@ -147,14 +153,14 @@ Ensures one exact line exists in a file.
 
 Arguments:
 
-| Argument         | Required | Default | Notes                                                            |
-| ---------------- | -------- | ------- | ---------------------------------------------------------------- |
-| `path`           | yes      | —       | Absolute file path.                                              |
-| `line`           | yes      | —       | Non-empty single line. `\n` and `\r` are rejected.               |
-| `create`         | no       | `true`  | Create the file when missing.                                    |
-| `create_parents` | no       | `false` | Create parent directories when creating the file.                |
-| `mode`           | no       | nil     | Applied when the file is created, rewritten, or already correct. |
-| `owner`          | no       | nil     | Applied when the file is created, rewritten, or already correct. |
+| Argument  | Required | Default | Notes                                                            |
+| --------- | -------- | ------- | ---------------------------------------------------------------- |
+| `path`    | yes      | —       | Absolute file path.                                              |
+| `line`    | yes      | —       | Non-empty single line. `\n` and `\r` are rejected.               |
+| `create`  | no       | `true`  | Create the file when missing.                                    |
+| `parents` | no       | `false` | Create parent directories when creating the file.                |
+| `mode`    | no       | nil     | Applied when the file is created, rewritten, or already correct. |
+| `owner`   | no       | nil     | Applied when the file is created, rewritten, or already correct. |
 
 Behavior:
 
@@ -236,7 +242,7 @@ Arguments:
 | `content`        | yes      | —       | Block content. May span multiple lines.                          |
 | `comment_prefix` | no       | `#`     | Prefix for marker lines. Must be a single non-empty line.        |
 | `create`         | no       | `true`  | Create the file when missing.                                    |
-| `create_parents` | no       | `false` | Create parent directories when creating the file.                |
+| `parents`        | no       | `false` | Create parent directories when creating the file.                |
 | `mode`           | no       | nil     | Applied when the file is created, rewritten, or already correct. |
 | `owner`          | no       | nil     | Applied when the file is created, rewritten, or already correct. |
 
@@ -277,7 +283,7 @@ Arguments:
 | `separator`      | no       | `=`     | Either `=` or a single space (`" "`).                                                           |
 | `comment_prefix` | no       | `#`     | Trimmed lines starting with this prefix are ignored. Empty string disables comment handling.    |
 | `create`         | no       | `true`  | Create the file when missing.                                                                   |
-| `create_parents` | no       | `false` | Create parent directories when creating the file.                                               |
+| `parents`        | no       | `false` | Create parent directories when creating the file.                                               |
 | `mode`           | no       | nil     | Applied when the file is created, rewritten, or already correct.                                |
 | `owner`          | no       | nil     | Applied when the file is created, rewritten, or already correct.                                |
 

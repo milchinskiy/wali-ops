@@ -1,3 +1,4 @@
+require("compat")
 local lib = require("wali.builtin.lib")
 
 local function validate_non_empty(value, field)
@@ -107,7 +108,7 @@ return {
 			content = { type = "string", required = true },
 			comment_prefix = { type = "string", default = "#" },
 			create = { type = "boolean", default = true },
-			create_parents = { type = "boolean", default = false },
+			parents = { type = "boolean", default = false },
 			mode = lib.schema.mode(),
 			owner = lib.schema.owner(),
 		},
@@ -160,7 +161,7 @@ return {
 			args.path,
 			updated,
 			lib.write_file_opts({
-				create_parents = false,
+				parents = false,
 				replace = true,
 				mode = args.mode,
 				owner = args.owner,

@@ -15,7 +15,7 @@ line_file=$TEST_SANDBOX/nested/lines.txt
 			args = {
 				path = $(lua_quote "$line_file"),
 				line = "hello world",
-				create_parents = true,
+				parents = true,
 			},
 		},
 MANIFEST

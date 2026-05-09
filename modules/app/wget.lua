@@ -1,3 +1,4 @@
+require("compat")
 local lib = require("wali.builtin.lib")
 
 local function validate_non_empty(value, field)
@@ -34,7 +35,7 @@ return {
 		props = {
 			url = { type = "string", required = true },
 			dest = { type = "string", required = true },
-			create_parents = { type = "boolean", default = false },
+			parents = { type = "boolean", default = false },
 			replace = { type = "boolean", default = true },
 			timeout = { type = "string" },
 			mode = lib.schema.mode(),
@@ -56,12 +57,12 @@ return {
 
 	apply = function(ctx, args)
 		if not args.replace and ctx.host.fs.exists(args.dest) then
-			return lib.result.apply():unchanged(args.dest, "destination already exists"):build()
+			return lib.skip("destination already exists and replace is false: " .. args.dest)
 		end
 
 		local result = lib.result.apply()
 		local parent = ctx.host.path.parent(args.dest)
-		if args.create_parents then
+		if args.parents then
 			result:merge(ctx.host.fs.create_dir(parent, { recursive = true }))
 		end
 
