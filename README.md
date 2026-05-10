@@ -68,7 +68,7 @@ tasks = {
 
 All paths are paths on the target host. Where a module validates a path, it
 expects an absolute path. This applies to arguments such as `path`, `dest`,
-`home`, `shell`, `source_dir`, and `service_dir`.
+`home`, `shell`, `src`, `source_dir`, and `service_dir`.
 
 A `timeout` argument, when present, is passed to wali command execution. Use the
 same timeout strings wali accepts, for example `10s` or `2m`.
@@ -141,6 +141,98 @@ Same contract as `ops.app.curl`, but uses `wget`.
 Requires: `wget`.
 
 The command form is `wget --output-document <tmp> -- <url>`.
+
+### `ops.app.archive`
+
+Creates one archive from one target-host file, directory, or symlink.
+
+Requires: `tar` for tar formats; `zip` for zip archives. The requirement is
+checked from the selected or detected format.
+
+Arguments:
+
+| Argument  | Required | Default      | Notes                                                                                 |
+| --------- | -------- | ------------ | ------------------------------------------------------------------------------------- |
+| `src`     | yes      | —            | Absolute source path. Must be a file, directory, or symlink at apply time.            |
+| `dest`    | yes      | —            | Absolute destination archive path. `/` is rejected.                                   |
+| `format`  | no       | `auto`       | `auto`, `tar`, `tar.gz`, `tgz`, `tar.bz2`, `tbz2`, `tbz`, `tar.xz`, `txz`, or `zip`. |
+| `parents` | no       | `false`      | Create the destination parent directory first.                                        |
+| `replace` | no       | `true`       | If `false` and `dest` exists, skip archive creation.                                  |
+| `timeout` | no       | host default | Command timeout.                                                                      |
+| `mode`    | no       | nil          | Mode applied to the created archive file.                                             |
+| `owner`   | no       | nil          | Owner applied to the created archive file.                                            |
+
+Behavior:
+
+- `format = "auto"` detects the archive format from `dest`: `.tar`, `.tar.gz`,
+  `.tgz`, `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`, and `.zip` are
+  supported.
+- Tar archives are created as `tar -C <src-parent> -c*f <tmp> ./<src-name>`.
+  Zip archives are created as `zip -q -r <tmp> ./<src-name>` with the working
+  directory set to the source parent.
+- The destination is written through a temporary directory in the destination
+  parent and then renamed into place.
+- Archiving `/`, writing the archive to `/`, using the same path for `src` and
+  `dest`, or placing `dest` inside a source directory fails.
+- Existing files are kept when `replace = false`; the task is skipped and no
+  metadata changes are made in that case.
+
+Results:
+
+- changed: the archive was created and moved into place;
+- skipped: `dest` already existed and `replace = false`;
+- error: invalid arguments, unsupported/undetected format, missing selected
+  command, missing source, unsafe source/destination combination, failed archive
+  command, failed rename, or failed metadata update.
+
+Result data is `{ src = <src>, dest = <dest>, format = <canonical-format> }`.
+Aliases such as `tgz`, `tbz2`, and `txz` are normalized to `tar.gz`, `tar.bz2`,
+and `tar.xz`.
+
+### `ops.app.unarchive`
+
+Extracts one target-host tar or zip archive into a target-host directory.
+
+Requires: `tar` for tar formats; `unzip` for zip archives. The requirement is
+checked from the selected or detected format. Zip safety validation uses
+`unzip -Z1`, so the `unzip` implementation must support that listing mode.
+
+Arguments:
+
+| Argument  | Required | Default      | Notes                                                                                 |
+| --------- | -------- | ------------ | ------------------------------------------------------------------------------------- |
+| `src`     | yes      | —            | Absolute source archive path. Must be a regular file at apply time.                   |
+| `dest`    | yes      | —            | Absolute destination directory. `/` is rejected.                                      |
+| `format`  | no       | `auto`       | `auto`, `tar`, `tar.gz`, `tgz`, `tar.bz2`, `tbz2`, `tbz`, `tar.xz`, `txz`, or `zip`. |
+| `parents` | no       | `false`      | Create missing parent directories for `dest` when `dest` does not exist.              |
+| `replace` | no       | `true`       | Allow archive members to overwrite existing files. For tar, `false` adds `-k`.       |
+| `timeout` | no       | host default | Command timeout.                                                                      |
+
+Behavior:
+
+- `format = "auto"` detects the archive format from `src` using the same suffixes
+  as `ops.app.archive`.
+- Missing `dest` is created. Existing `dest` must be a directory.
+- Before extraction, archive member names are listed and rejected if they are
+  empty, absolute, contain control characters, or contain `..` path components.
+  This rejects ordinary path-traversal archives before extraction.
+- This module is not a sandbox for hostile archives. Do not use it to extract
+  archives from untrusted sources.
+- Tar archives are extracted as `tar -C <dest> -x*f <src>`; `replace = false`
+  adds `-k` before the extract flag. Zip archives are extracted as
+  `unzip -q -o <src> -d <dest>` or `unzip -q -n <src> -d <dest>`.
+- The module is a direct extraction operation. It does not delete destination
+  files that are absent from the archive and it does not try to infer whether
+  extracted content already matches.
+
+Results:
+
+- changed: the extraction command succeeded;
+- error: invalid arguments, unsupported/undetected format, missing selected
+  command, missing archive, non-directory destination, unsafe member path,
+  failed listing command, failed extraction command, or filesystem failure.
+
+Result data is `{ src = <src>, dest = <dest>, format = <canonical-format> }`.
 
 ## File modules
 
